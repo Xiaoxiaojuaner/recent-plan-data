@@ -1,0 +1,52 @@
+.field-help { color: #b05c51; font-size: 11px; }
+.schedule-empty { text-align: center; padding: 70px 20px; }
+.schedule-empty h2 { font-family: Georgia, "Noto Serif SC", serif; margin: 14px 0 6px; }
+.schedule-empty p { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+.schedule-illustration { width: 58px; height: 58px; border-radius: 18px; background: #e3ebe4; color: var(--green); display: grid; place-items: center; margin: auto; font-size: 23px; font-family: Georgia, serif; }
+.schedule-panel { padding: 18px; overflow: auto; }
+.schedule-head { display: grid; grid-template-columns: 54px repeat(7, minmax(100px, 1fr)); min-width: 820px; margin-bottom: 8px; }
+.schedule-head span, .schedule-head strong { text-align: center; padding: 8px; color: #748078; font-size: 11px; }
+.week-grid { display: grid; grid-template-columns: 54px repeat(7, minmax(100px, 1fr)); grid-template-rows: repeat(12, 42px); min-width: 820px; position: relative; }
+.section-label { display: grid; place-items: center; color: #98a099; font-size: 11px; }
+.schedule-slot { border-left: 1px solid var(--line); border-top: 1px solid var(--line); }
+.course-card { z-index: 2; margin: 3px; border: 0; border-left: 4px solid; border-radius: 7px; padding: 7px; text-align: left; display: flex; flex-direction: column; overflow: hidden; cursor: pointer; box-shadow: 0 1px 4px #33463a18; }
+.course-card:hover { transform: translateY(-1px); box-shadow: 0 3px 9px #33463a25; }
+.course-card strong { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.course-card span, .course-card small { font-size: 9px; color: #68736c; margin-top: 2px; }
+.course-assignments { margin-top: 18px; overflow: hidden; }
+.assignment-row { width: 100%; border: 0; border-top: 1px solid #e8ece7; background: transparent; padding: 13px 20px; display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 15px; text-align: left; cursor: pointer; }
+.assignment-row:hover { background: #f5f8f4; }
+.assignment-row > span:last-child { color: var(--muted); font-size: 11px; }
+.course-chip { color: white; border-radius: 8px; padding: 4px 8px; font-size: 10px; text-align: center; }
+.inline-empty { color: var(--muted); font-size: 13px; padding: 5px 22px 24px; }
+.import-modal { padding: 25px; }
+.import-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 15px; }
+.import-steps span { background: #edf2ed; border-radius: 8px; padding: 10px; font-size: 11px; color: #617066; }
+.template-box { display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.template-box strong { font-size: 13px; }
+.template-box p { font-size: 11px; color: var(--muted); margin: 3px 0 0; }
+.file-drop { display: block; text-align: center; border: 1px dashed #9eafa3; background: #f3f7f2; color: var(--green); border-radius: 10px; padding: 14px; margin-top: 12px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.file-drop input { display: none; }
+.or { text-align: center; color: #a1aaa3; font-size: 10px; margin: 10px; }
+.json-input { width: 100%; font-family: Consolas, monospace; font-size: 11px; }
+.form-error { color: #ad4d47; font-size: 12px; margin: 8px 0 0; }
+.range-switch { display: inline-flex; background: #e8ece7; padding: 4px; border-radius: 10px; margin: -12px 0 15px; }
+.range-switch button { border: 0; background: transparent; padding: 7px 15px; border-radius: 7px; cursor: pointer; font-size: 12px; color: #758078; }
+.range-switch button.active { background: white; color: var(--green); font-weight: 700; box-shadow: 0 2px 7px #33463a16; }
+.all-courses { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 13px; }
+.course-list-card { border-top: 4px solid; padding: 20px; display: flex; flex-direction: column; text-align: left; cursor: pointer; }
+.course-list-card strong { font-size: 15px; }
+.course-list-card span, .course-list-card small { color: var(--muted); margin-top: 6px; }
+.course-list-card small { font-size: 10px; }
+.calendar-cell.has-course:not(.outside) { background: #fffbd1; }
+.calendar-cell.has-course.today { background: #fff5a5; }
+.grouped-tasks { display: flex; flex-direction: column; gap: 14px; }
+.task-group-title { display: flex; align-items: center; gap: 8px; padding: 16px 20px; }
+.task-group-title span { color: var(--muted); font-size: 11px; margin-left: auto; }
+.nav-letter { width: 20px; height: 20px; display: grid; place-items: center; font: 700 15px Georgia, serif; }
+
+@media (max-width: 720px) {
+  .import-steps { grid-template-columns: 1fr; }
+  .assignment-row { grid-template-columns: 90px 1fr; }
+  .assignment-row > span:last-child { grid-column: 2; }
+}
