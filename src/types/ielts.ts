@@ -13,7 +13,10 @@ export interface IeltsWork {
   actualMinutes: number | null;
   score: number | null;
   readingCorrect: number[] | null;
+  readingTotals: number[] | null;
   listeningCorrect: number[] | null;
+  listeningTotals: number[] | null;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,4 +29,29 @@ export interface IeltsMock extends IeltsScores {
   updatedAt: string;
 }
 
-export interface IeltsData { goal: IeltsGoal | null; works: IeltsWork[]; mocks: IeltsMock[] }
+export interface IeltsCourseInput {
+  name: string;
+  startAt: string;
+  endAt: string;
+  teacher: string;
+  classroom: string;
+  color: string;
+  notes: string;
+}
+
+export interface IeltsCourse extends IeltsCourseInput {
+  recordId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IeltsData { goal: IeltsGoal | null; works: IeltsWork[]; mocks: IeltsMock[]; courses: IeltsCourse[]; readWarnings: string[] }
+
+export interface IeltsCompletionInput {
+  actualMinutes: number;
+  score: number | null;
+  readingCorrect: number[] | null;
+  readingTotals: number[] | null;
+  listeningCorrect: number[] | null;
+  listeningTotals: number[] | null;
+}

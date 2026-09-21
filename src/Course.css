@@ -7,13 +7,29 @@
 .schedule-head { display: grid; grid-template-columns: 54px repeat(7, minmax(100px, 1fr)); min-width: 820px; margin-bottom: 8px; }
 .schedule-head span, .schedule-head strong { text-align: center; padding: 8px; color: #748078; font-size: 11px; }
 .week-grid { display: grid; grid-template-columns: 54px repeat(7, minmax(100px, 1fr)); grid-template-rows: repeat(12, 42px); min-width: 820px; position: relative; }
-.section-label { display: grid; place-items: center; color: #98a099; font-size: 11px; }
+.section-label { display: grid; place-items: center; color: #98a099; font-size: 11px; line-height: 1.15; }
+.section-label b { font-size: 11px; }
+.section-label small { font-size: 8px; color: #78847c; text-align: center; }
 .schedule-slot { border-left: 1px solid var(--line); border-top: 1px solid var(--line); }
-.course-card { z-index: 2; margin: 3px; border: 0; border-left: 4px solid; border-radius: 7px; padding: 7px; text-align: left; display: flex; flex-direction: column; overflow: hidden; cursor: pointer; box-shadow: 0 1px 4px #33463a18; }
+.course-slot-group { z-index: 2; display: flex; min-width: 0; overflow: hidden; }
+.course-card { flex: 1 1 0; min-width: 0; margin: 3px; border: 0; border-left: 4px solid; border-radius: 7px; padding: 7px; text-align: left; display: flex; flex-direction: column; overflow: hidden; cursor: pointer; position: relative; box-shadow: 0 1px 4px #33463a18; }
 .course-card:hover { transform: translateY(-1px); box-shadow: 0 3px 9px #33463a25; }
 .course-card strong { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .course-card span, .course-card small { font-size: 9px; color: #68736c; margin-top: 2px; }
+.schedule-editing .course-card { cursor: move; user-select: none; }
+.schedule-editing .course-card:active { cursor: move; }
+.resize-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: white; border: 2px solid var(--green); padding: 0; cursor: ns-resize; z-index: 4; }
+.resize-dot.top { left: -7px; top: -4px; }
+.resize-dot.bottom { right: -4px; bottom: -4px; }
+.course-task-button { margin-top: auto; padding: 2px 0 0; border: 0; background: transparent; color: var(--green); font-size: 9px; text-align: left; cursor: pointer; }
+.inline-fields { display: flex; gap: 5px; align-items: center; }
+.inline-fields input { width: 58px; }
+.scope-picker { border: 1px solid var(--line); border-radius: 9px; margin: 14px 0; padding: 10px; display: grid; gap: 8px; color: var(--muted); font-size: 12px; }
+.scope-picker legend { color: #405046; font-weight: 700; padding: 0 4px; }
+.scope-picker input[type="text"], .scope-picker > input { padding: 7px; }
 .course-assignments { margin-top: 18px; overflow: hidden; }
+.schedule-edit-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; min-height: 42px; margin: 10px 0 2px; }
+.schedule-edit-actions > span { margin-right: auto; color: var(--muted); font-size: 11px; }
 .assignment-row { width: 100%; border: 0; border-top: 1px solid #e8ece7; background: transparent; padding: 13px 20px; display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 15px; text-align: left; cursor: pointer; }
 .assignment-row:hover { background: #f5f8f4; }
 .assignment-row > span:last-child { color: var(--muted); font-size: 11px; }
@@ -33,6 +49,15 @@
 .range-switch { display: inline-flex; background: #e8ece7; padding: 4px; border-radius: 10px; margin: -12px 0 15px; }
 .range-switch button { border: 0; background: transparent; padding: 7px 15px; border-radius: 7px; cursor: pointer; font-size: 12px; color: #758078; }
 .range-switch button.active { background: white; color: var(--green); font-weight: 700; box-shadow: 0 2px 7px #33463a16; }
+.schedule-controls { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin: -12px 0 15px; }
+.schedule-controls .range-switch { margin: 0; }
+.schedule-controls > span { color: var(--muted); font-size: 11px; }
+.start-date-control { display: flex; align-items: end; gap: 8px; }
+.start-date-control label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 10px; }
+.start-date-control input { padding: 7px 9px; }
+.start-date-control > span { align-self: center; color: var(--muted); font-size: 11px; }
+.semester-field { margin-bottom: 14px; }
+.semester-field small { color: var(--muted); font-size: 10px; }
 .all-courses { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 13px; }
 .course-list-card { border-top: 4px solid; padding: 20px; display: flex; flex-direction: column; text-align: left; cursor: pointer; }
 .course-list-card strong { font-size: 15px; }
@@ -40,6 +65,9 @@
 .course-list-card small { font-size: 10px; }
 .calendar-cell.has-course:not(.outside) { background: #fffbd1; }
 .calendar-cell.has-course.today { background: #fff5a5; }
+.calendar-cell.has-ielts-course:not(.outside) { background: #eee7ff; }
+.calendar-cell.has-course.has-ielts-course:not(.outside) { background: linear-gradient(135deg, #fffbd1 0 50%, #eee7ff 50%); }
+.ielts-course-mark { display: inline-block; margin: 0 5px 3px; padding: 2px 5px; border-radius: 5px; background: #8066aa; color: white; font-size: 8px; }
 .grouped-tasks { display: flex; flex-direction: column; gap: 14px; }
 .task-group-title { display: flex; align-items: center; gap: 8px; padding: 16px 20px; }
 .task-group-title span { color: var(--muted); font-size: 11px; margin-left: auto; }

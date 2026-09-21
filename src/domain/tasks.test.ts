@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canQuickComplete, createCourseTaskDraft, getDashboardGroups, getMonthCells, groupTasksByType, hasCourseOnDate, isTaskOverdue, matchesTask } from "./tasks";
-import type { Course } from "../types/course";
+import { canQuickComplete, createCourseTaskDraft, getDashboardGroups, getMonthCells, groupTasksByType, isTaskOverdue, matchesTask } from "./tasks";
 import type { Task } from "../types/task";
 
 const baseTask: Task = {
@@ -66,11 +65,6 @@ describe("calendar", () => {
     expect(cells.find((cell) => cell.dateKey === "2026-09-11")?.tasks).toHaveLength(1);
   });
 
-  it("marks a date when an imported course uses that weekday", () => {
-    const course = { weekday: 5 } as Course;
-    expect(hasCourseOnDate(new Date(2026, 8, 11), [course])).toBe(true);
-    expect(hasCourseOnDate(new Date(2026, 8, 12), [course])).toBe(false);
-  });
 });
 
 describe("task grouping", () => {

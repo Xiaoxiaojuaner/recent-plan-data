@@ -1,4 +1,3 @@
-import type { Course } from "../types/course";
 import type { Task, TaskFilters, TaskInput, TaskType } from "../types/task";
 
 export function dateKey(date: Date): string {
@@ -75,11 +74,6 @@ export function createCourseTaskDraft(courseId: string, now = new Date()): TaskI
     courseTaskType: "assignment",
     customCourseTaskType: null,
   };
-}
-
-export function hasCourseOnDate(date: Date, courses: Course[]): boolean {
-  const weekday = date.getDay() === 0 ? 7 : date.getDay();
-  return courses.some((course) => course.weekday === weekday);
 }
 
 export interface CalendarCell { date: Date; dateKey: string; inMonth: boolean; tasks: Task[] }

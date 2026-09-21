@@ -1,4 +1,4 @@
-use chrono::{Local, SecondsFormat};
+use chrono::{Datelike, Local, NaiveDate, SecondsFormat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -103,6 +103,8 @@ pub struct Course {
     pub updated_at: String,
     pub deleted_at: Option<String>,
     pub content_hash: String,
+    #[serde(default = "default_schedule_id")]
+    pub schedule_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -126,15 +128,95 @@ pub struct CourseInput {
     pub color: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleSettings {
+    pub semester_start_date: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Schedule {
+    pub id: String,
+    pub name: String,
+    pub semester_start_date: String,
+    pub color: String,
+    #[serde(default)]
+    pub routines: Vec<ScheduleRoutine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleRoutine { pub section: u8, pub start_time: String, pub end_time: String }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleUpdateInput { pub name: String, pub semester_start_date: String, pub color: String, #[serde(default)] pub routines: Vec<ScheduleRoutine> }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CourseUpdateInput {
+    pub name: String, #[serde(default)] pub teacher: String, #[serde(default)] pub classroom: String,
+    pub weekday: u8, pub start_section: u8, pub end_section: u8,
+    #[serde(default)] pub start_time: String, #[serde(default)] pub end_time: String,
+    pub start_week: u8, pub end_week: u8, pub color: String,
+    pub scope_weeks: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleImportInput {
+    pub schedule_id: Option<String>,
+    pub schedule_name: String,
+    pub semester_start_date: String,
+    pub color: String,
+    pub mode: String,
+    pub courses: Vec<CourseInput>,
+}
+
 fn default_course_color() -> String {
     "#6f8f7b".into()
 }
 
+fn default_schedule_id() -> String { "default".into() }
+
 pub fn initialize(app: &AppHandle) -> io::Result<()> {
+    synchronize(app)?;
     fs::create_dir_all(task_dir(app)?)?;
     fs::create_dir_all(data_dir(app)?.join("records").join("courses"))?;
     rebuild_index(app)?;
     rebuild_course_index(&data_dir(app)?)
+}
+
+/// Keeps the legacy Windows data location and the portable desktop data folder
+/// identical.  When the same record exists in both places, the newer file wins.
+pub fn synchronize(app: &AppHandle) -> io::Result<()> {
+    let primary = data_dir(app)?;
+    let legacy = app.path().app_data_dir()
+        .map(|path| path.join("data"))
+        .map_err(io::Error::other)?;
+    if primary == legacy { return Ok(()); }
+    sync_tree(&primary, &legacy)?;
+    sync_tree(&legacy, &primary)
+}
+
+fn sync_tree(source: &Path, destination: &Path) -> io::Result<()> {
+    if !source.exists() { return Ok(()); }
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = destination.join(entry.file_name());
+        if path.is_dir() {
+            sync_tree(&path, &target)?;
+        } else if entry.file_name() != "INDEX.md" && entry.file_name() != "SCHEDULE.md" {
+            let should_copy = !target.exists() || fs::metadata(&path)?.modified()? > fs::metadata(&target)?.modified()?;
+            if should_copy {
+                if let Some(parent) = target.parent() { fs::create_dir_all(parent)?; }
+                fs::copy(path, target)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn list_tasks(app: &AppHandle) -> io::Result<Vec<Task>> {
@@ -150,7 +232,10 @@ fn list_tasks_from(root: &Path) -> io::Result<Vec<Task>> {
         if path.extension().and_then(|value| value.to_str()) != Some("md") {
             continue;
         }
-        if let Ok(task) = parse_task(&fs::read_to_string(path)?) {
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(task) = parse_task(&content) {
             if task.deleted_at.is_none() {
                 tasks.push(task);
             }
@@ -243,10 +328,149 @@ pub fn list_courses(app: &AppHandle) -> io::Result<Vec<Course>> {
 }
 
 pub fn import_courses(app: &AppHandle, inputs: Vec<CourseInput>) -> io::Result<Vec<Course>> {
-    import_courses_to(&data_dir(app)?, inputs)
+    import_courses_to_schedule(&data_dir(app)?, inputs, "default")
 }
 
-fn import_courses_to(root: &Path, inputs: Vec<CourseInput>) -> io::Result<Vec<Course>> {
+pub fn get_schedule_settings(app: &AppHandle) -> io::Result<ScheduleSettings> {
+    get_schedule_settings_from(&data_dir(app)?)
+}
+
+pub fn save_schedule_settings(app: &AppHandle, semester_start_date: &str) -> io::Result<ScheduleSettings> {
+    save_schedule_settings_to(&data_dir(app)?, semester_start_date)
+}
+
+pub fn list_schedules(app: &AppHandle) -> io::Result<Vec<Schedule>> {
+    list_schedules_from(&data_dir(app)?)
+}
+
+pub fn import_schedule(app: &AppHandle, input: ScheduleImportInput) -> io::Result<Vec<Course>> {
+    if input.schedule_name.trim().is_empty() || input.schedule_name.chars().count() > 60 {
+        return Err(invalid("课表名称应为 1 到 60 个字符"));
+    }
+    if !["append", "replace"].contains(&input.mode.as_str()) {
+        return Err(invalid("导入方式不正确"));
+    }
+    NaiveDate::parse_from_str(&input.semester_start_date, "%Y-%m-%d")
+        .map_err(|_| invalid("请选择有效的开学日期"))?;
+    if !input.color.starts_with('#') || input.color.len() != 7 { return Err(invalid("课表颜色必须使用 #RRGGBB 格式")); }
+    if input.courses.is_empty() { return Err(invalid("课表中没有课程")); }
+    for course in &input.courses { validate_course(course)?; }
+    let root = data_dir(app)?;
+    let mut schedules = list_schedules_from(&root)?;
+    let id = input.schedule_id.filter(|id| !id.is_empty()).unwrap_or_else(|| Uuid::new_v4().to_string());
+    if let Some(schedule) = schedules.iter_mut().find(|schedule| schedule.id == id) {
+        schedule.name = input.schedule_name.trim().into();
+        schedule.semester_start_date = input.semester_start_date.clone();
+        schedule.color = input.color.clone();
+    } else {
+        schedules.push(Schedule { id: id.clone(), name: input.schedule_name.trim().into(), semester_start_date: input.semester_start_date.clone(), color: input.color.clone(), routines: vec![] });
+    }
+    if input.mode == "replace" {
+        for mut course in list_courses_from(&root)?.into_iter().filter(|course| course.schedule_id == id) {
+            course.deleted_at = Some(now()); course.updated_at = now(); save_course_to(&root, &mut course)?;
+        }
+    }
+    import_courses_to_schedule(&root, input.courses, &id)?;
+    save_schedules_to(&root, &schedules)?;
+    list_courses_from(&root)
+}
+
+pub fn delete_schedule(app: &AppHandle, id: &str) -> io::Result<()> {
+    let root = data_dir(app)?;
+    let mut schedules = list_schedules_from(&root)?;
+    if schedules.len() <= 1 { return Err(invalid("至少保留一份课表")); }
+    let before = schedules.len(); schedules.retain(|schedule| schedule.id != id);
+    if before == schedules.len() { return Err(invalid("课表不存在")); }
+    for mut course in list_courses_from(&root)?.into_iter().filter(|course| course.schedule_id == id) {
+        course.deleted_at = Some(now()); course.updated_at = now(); save_course_to(&root, &mut course)?;
+    }
+    save_schedules_to(&root, &schedules)
+}
+
+pub fn update_schedule(app: &AppHandle, id: &str, input: ScheduleUpdateInput) -> io::Result<Schedule> {
+    if input.name.trim().is_empty() || input.name.chars().count() > 60 { return Err(invalid("课表名称应为 1 到 60 个字符")); }
+    NaiveDate::parse_from_str(&input.semester_start_date, "%Y-%m-%d").map_err(|_| invalid("请选择有效的开学日期"))?;
+    if !input.color.starts_with('#') || input.color.len() != 7 { return Err(invalid("课表颜色必须使用 #RRGGBB 格式")); }
+    validate_routines(&input.routines)?;
+    let root = data_dir(app)?;
+    let mut schedules = list_schedules_from(&root)?;
+    let schedule = schedules.iter_mut().find(|schedule| schedule.id == id).ok_or_else(|| invalid("课表不存在"))?;
+    schedule.name = input.name.trim().into(); schedule.semester_start_date = input.semester_start_date; schedule.color = input.color; schedule.routines = input.routines;
+    let result = schedule.clone(); save_schedules_to(&root, &schedules)?; Ok(result)
+}
+
+pub fn update_course(app: &AppHandle, id: &str, input: CourseUpdateInput) -> io::Result<Vec<Course>> {
+    validate_id(id)?;
+    let edited = CourseInput { name: input.name, teacher: input.teacher, classroom: input.classroom, weekday: input.weekday, start_section: input.start_section, end_section: input.end_section, start_time: input.start_time, end_time: input.end_time, start_week: input.start_week, end_week: input.end_week, color: input.color };
+    validate_course(&edited)?;
+    let root = data_dir(app)?; let source = list_courses_from(&root)?.into_iter().find(|course| course.record_id == id).ok_or_else(|| invalid("课程不存在"))?;
+    let selected: Vec<u8> = input.scope_weeks.unwrap_or_default();
+    if selected.is_empty() { return save_course_edit(&root, source, edited).map(|course| vec![course]); }
+    if selected.iter().any(|week| *week < source.start_week || *week > source.end_week) { return Err(invalid("选择的周次不在原课程范围内")); }
+    let mut selected = selected; selected.sort_unstable(); selected.dedup();
+    if selected.len() == usize::from(source.end_week - source.start_week + 1) { return save_course_edit(&root, source, edited).map(|course| vec![course]); }
+    let selected_set: std::collections::BTreeSet<u8> = selected.into_iter().collect();
+    let mut groups: Vec<(bool, u8, u8)> = vec![];
+    for week in source.start_week..=source.end_week { let changed = selected_set.contains(&week); match groups.last_mut() { Some((previous, _, end)) if *previous == changed => *end = week, _ => groups.push((changed, week, week)) } }
+    let timestamp = now(); let mut first = true;
+    for (changed, start_week, end_week) in groups { let base = if changed { &edited } else { &CourseInput { name: source.name.clone(), teacher: source.teacher.clone(), classroom: source.classroom.clone(), weekday: source.weekday, start_section: source.start_section, end_section: source.end_section, start_time: source.start_time.clone(), end_time: source.end_time.clone(), start_week, end_week, color: source.color.clone() } };
+        let mut course = Course { schema_version: SCHEMA_VERSION, record_id: if first { first = false; source.record_id.clone() } else { Uuid::new_v4().to_string() }, entity_type: "course".into(), name: base.name.trim().into(), teacher: base.teacher.trim().into(), classroom: base.classroom.trim().into(), weekday: base.weekday, start_section: base.start_section, end_section: base.end_section, start_time: base.start_time.trim().into(), end_time: base.end_time.trim().into(), start_week, end_week, color: base.color.clone(), created_at: if first { timestamp.clone() } else { source.created_at.clone() }, updated_at: timestamp.clone(), deleted_at: None, content_hash: String::new(), schedule_id: source.schedule_id.clone() };
+        save_course_to(&root, &mut course)?;
+    }
+    list_courses_from(&root)
+}
+
+fn save_course_edit(root: &Path, mut course: Course, input: CourseInput) -> io::Result<Course> {
+    course.name = input.name.trim().into(); course.teacher = input.teacher.trim().into(); course.classroom = input.classroom.trim().into(); course.weekday = input.weekday; course.start_section = input.start_section; course.end_section = input.end_section; course.start_time = input.start_time.trim().into(); course.end_time = input.end_time.trim().into(); course.start_week = input.start_week; course.end_week = input.end_week; course.color = input.color; course.updated_at = now(); save_course_to(root, &mut course)?; Ok(course)
+}
+
+fn validate_routines(routines: &[ScheduleRoutine]) -> io::Result<()> {
+    let mut previous = 0; for routine in routines { if routine.section == 0 || routine.section > 20 || routine.section <= previous || !valid_time(&routine.start_time) || !valid_time(&routine.end_time) || routine.start_time >= routine.end_time { return Err(invalid("作息的节次或时间不正确")); } previous = routine.section; } Ok(())
+}
+fn valid_time(value: &str) -> bool { value.len() == 5 && value.as_bytes().get(2) == Some(&b':') && NaiveDate::parse_from_str(&format!("2000-01-01 {value}"), "%Y-%m-%d %H:%M").is_ok() }
+
+fn list_schedules_from(root: &Path) -> io::Result<Vec<Schedule>> {
+    let path = root.join("SCHEDULES.md");
+    if !path.exists() {
+        let old = get_schedule_settings_from(root)?;
+        let schedules = vec![Schedule { id: default_schedule_id(), name: "我的课表".into(), semester_start_date: old.semester_start_date, color: "#6f8f7b".into(), routines: vec![] }];
+        save_schedules_to(root, &schedules)?;
+        return Ok(schedules);
+    }
+    let content = fs::read_to_string(path)?;
+    let json = content.split_once("```json\n").and_then(|(_, rest)| rest.split_once("\n```")).map(|(json, _)| json)
+        .ok_or_else(|| invalid("课表列表文件格式错误"))?;
+    serde_json::from_str(json).map_err(io::Error::other)
+}
+
+fn save_schedules_to(root: &Path, schedules: &[Schedule]) -> io::Result<()> {
+    let json = serde_json::to_string_pretty(schedules).map_err(io::Error::other)?;
+    atomic_write(&root.join("SCHEDULES.md"), format!("# 课表列表\n\n```json\n{json}\n```\n").as_bytes())
+}
+
+fn get_schedule_settings_from(root: &Path) -> io::Result<ScheduleSettings> {
+    let path = root.join("SCHEDULE_SETTINGS.md");
+    if !path.exists() {
+        return Ok(ScheduleSettings { semester_start_date: format!("{}-09-01", Local::now().year()) });
+    }
+    let content = fs::read_to_string(path)?;
+    let json = content.split_once("```json\n").and_then(|(_, rest)| rest.split_once("\n```")).map(|(json, _)| json)
+        .ok_or_else(|| invalid("课表设置文件格式错误"))?;
+    serde_json::from_str(json).map_err(io::Error::other)
+}
+
+fn save_schedule_settings_to(root: &Path, semester_start_date: &str) -> io::Result<ScheduleSettings> {
+    NaiveDate::parse_from_str(semester_start_date, "%Y-%m-%d")
+        .map_err(|_| invalid("请选择有效的开学日期"))?;
+    let settings = ScheduleSettings { semester_start_date: semester_start_date.into() };
+    let json = serde_json::to_string_pretty(&settings).map_err(io::Error::other)?;
+    let body = format!("# 课表设置\n\n```json\n{json}\n```\n");
+    fs::create_dir_all(root)?;
+    atomic_write(&root.join("SCHEDULE_SETTINGS.md"), body.as_bytes())?;
+    Ok(settings)
+}
+
+fn import_courses_to_schedule(root: &Path, inputs: Vec<CourseInput>, schedule_id: &str) -> io::Result<Vec<Course>> {
     if inputs.is_empty() {
         return Err(invalid("课表中没有课程"));
     }
@@ -258,7 +482,7 @@ fn import_courses_to(root: &Path, inputs: Vec<CourseInput>) -> io::Result<Vec<Co
     for input in inputs {
         let matched = existing
             .iter()
-            .find(|course| course_identity(course) == input_identity(&input));
+            .find(|course| course.schedule_id == schedule_id && course_identity(course) == input_identity(&input));
         let timestamp = now();
         let mut course = Course {
             schema_version: SCHEMA_VERSION,
@@ -283,6 +507,7 @@ fn import_courses_to(root: &Path, inputs: Vec<CourseInput>) -> io::Result<Vec<Co
             updated_at: timestamp,
             deleted_at: None,
             content_hash: String::new(),
+            schedule_id: schedule_id.into(),
         };
         save_course_to(root, &mut course)?;
     }
@@ -395,7 +620,10 @@ fn list_courses_from(root: &Path) -> io::Result<Vec<Course>> {
         if path.extension().and_then(|value| value.to_str()) != Some("md") {
             continue;
         }
-        if let Ok(course) = parse_course(&fs::read_to_string(path)?) {
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(course) = parse_course(&content) {
             if course.deleted_at.is_none() {
                 courses.push(course);
             }
@@ -430,7 +658,16 @@ fn load_task(app: &AppHandle, id: &str) -> io::Result<Task> {
     parse_task(&fs::read_to_string(path)?)
 }
 
-fn data_dir(app: &AppHandle) -> io::Result<PathBuf> {
+pub(crate) fn data_dir(app: &AppHandle) -> io::Result<PathBuf> {
+    // 发布版把数据固定放在 exe 同级目录，避免不同启动方式解析到不同的
+    // Windows 用户数据目录。开发环境仍沿用 Tauri 默认目录，避免污染发布包。
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            if exe_dir.file_name().is_some_and(|name| name == "桌面版") {
+                return Ok(exe_dir.join("近期规划数据"));
+            }
+        }
+    }
     app.path()
         .app_data_dir()
         .map(|path| path.join("data"))
@@ -550,11 +787,11 @@ fn parse_task(content: &str) -> io::Result<Task> {
 
 fn render_course(course: &Course) -> String {
     format!(
-        "---\nschema_version: {}\nrecord_id: {}\nentity_type: {}\nname: {}\nteacher: {}\nclassroom: {}\nweekday: {}\nstart_section: {}\nend_section: {}\nstart_time: {}\nend_time: {}\nstart_week: {}\nend_week: {}\ncolor: {}\ncreated_at: {}\nupdated_at: {}\ndeleted_at: {}\ncontent_hash: {}\n---\n\n# {}\n\n- 教师：{}\n- 教室：{}\n- 上课：周{}，第 {}-{} 节\n- 周次：第 {}-{} 周\n",
+        "---\nschema_version: {}\nrecord_id: {}\nentity_type: {}\nname: {}\nteacher: {}\nclassroom: {}\nweekday: {}\nstart_section: {}\nend_section: {}\nstart_time: {}\nend_time: {}\nstart_week: {}\nend_week: {}\ncolor: {}\nschedule_id: {}\ncreated_at: {}\nupdated_at: {}\ndeleted_at: {}\ncontent_hash: {}\n---\n\n# {}\n\n- 教师：{}\n- 教室：{}\n- 上课：周{}，第 {}-{} 节\n- 周次：第 {}-{} 周\n",
         course.schema_version, json(&course.record_id), json(&course.entity_type), json(&course.name),
         json(&course.teacher), json(&course.classroom), course.weekday, course.start_section,
         course.end_section, json(&course.start_time), json(&course.end_time), course.start_week,
-        course.end_week, json(&course.color), json(&course.created_at), json(&course.updated_at),
+        course.end_week, json(&course.color), json(&course.schedule_id), json(&course.created_at), json(&course.updated_at),
         json(&course.deleted_at), json(&course.content_hash), course.name,
         if course.teacher.is_empty() { "未填写" } else { &course.teacher },
         if course.classroom.is_empty() { "未填写" } else { &course.classroom },
@@ -577,7 +814,7 @@ fn parse_course(content: &str) -> io::Result<Course> {
             "schema_version" => "schemaVersion", "record_id" => "recordId",
             "entity_type" => "entityType", "start_section" => "startSection",
             "end_section" => "endSection", "start_time" => "startTime",
-            "end_time" => "endTime", "start_week" => "startWeek", "end_week" => "endWeek",
+            "end_time" => "endTime", "start_week" => "startWeek", "end_week" => "endWeek", "schedule_id" => "scheduleId",
             "created_at" => "createdAt", "updated_at" => "updatedAt",
             "deleted_at" => "deletedAt", "content_hash" => "contentHash", other => other,
         };
@@ -720,6 +957,36 @@ mod tests {
     }
 
     #[test]
+    fn malformed_record_does_not_hide_other_tasks_or_courses() {
+        let root = std::env::temp_dir().join(format!("recent-plan-partial-read-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("records").join("tasks")).unwrap();
+        fs::create_dir_all(root.join("records").join("courses")).unwrap();
+
+        let mut task = Task {
+            schema_version: 1, record_id: Uuid::new_v4().to_string(), entity_type: "task".into(),
+            title: "可读取任务".into(), task_type: "other".into(), source_module: "task".into(),
+            description: String::new(), tags: vec![], priority: "medium".into(), status: "not_started".into(),
+            start_at: None, due_at: None, reminder_at: None, created_at: now(), updated_at: now(),
+            deleted_at: None, notes: String::new(), course_id: None, course_task_type: None,
+            custom_course_task_type: None, asset_refs: vec![], source_import_id: None, content_hash: String::new(),
+        };
+        save_task_to(&root, &mut task).unwrap();
+        fs::write(root.join("records").join("tasks").join("broken.md"), "broken task").unwrap();
+
+        let input = CourseInput {
+            name: "可读取课程".into(), teacher: String::new(), classroom: String::new(),
+            weekday: 1, start_section: 1, end_section: 2, start_time: String::new(), end_time: String::new(),
+            start_week: 1, end_week: 16, color: "#6f8f7b".into(),
+        };
+        import_courses_to_schedule(&root, vec![input], "default").unwrap();
+        fs::write(root.join("records").join("courses").join("broken.md"), "broken course").unwrap();
+
+        assert_eq!(list_tasks_from(&root).unwrap().len(), 1);
+        assert_eq!(list_courses_from(&root).unwrap().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn course_import_round_trips_and_merges_repeat_import() {
         let root = std::env::temp_dir().join(format!("recent-plan-course-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
@@ -728,11 +995,11 @@ mod tests {
             weekday: 1, start_section: 1, end_section: 2, start_time: "08:00".into(),
             end_time: "09:40".into(), start_week: 1, end_week: 16, color: "#6f8f7b".into(),
         };
-        let first = import_courses_to(&root, vec![input.clone()]).unwrap();
+        let first = import_courses_to_schedule(&root, vec![input.clone()], "default").unwrap();
         let record_id = first[0].record_id.clone();
         let mut changed = input;
         changed.classroom = "A102".into();
-        let second = import_courses_to(&root, vec![changed]).unwrap();
+        let second = import_courses_to_schedule(&root, vec![changed], "default").unwrap();
 
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].record_id, record_id);
@@ -742,5 +1009,23 @@ mod tests {
         assert!(validate_course_link_at(&root, "course", Some(&Uuid::new_v4().to_string())).is_err());
         assert!(fs::read_to_string(root.join("SCHEDULE.md")).unwrap().contains("高等数学"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn schedule_settings_default_and_round_trip_accept_any_valid_start_date() {
+        let root = std::env::temp_dir().join(format!("recent-plan-settings-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(get_schedule_settings_from(&root).unwrap().semester_start_date.ends_with("-09-01"));
+        assert!(save_schedule_settings_to(&root, "2026-09-31").is_err());
+        save_schedule_settings_to(&root, "2026-09-01").unwrap();
+        assert_eq!(get_schedule_settings_from(&root).unwrap().semester_start_date, "2026-09-01");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn schedule_routines_reject_invalid_sections_and_times() {
+        assert!(validate_routines(&[ScheduleRoutine { section: 1, start_time: "08:00".into(), end_time: "08:45".into() }]).is_ok());
+        assert!(validate_routines(&[ScheduleRoutine { section: 1, start_time: "09:00".into(), end_time: "08:45".into() }]).is_err());
+        assert!(validate_routines(&[ScheduleRoutine { section: 1, start_time: "08:00".into(), end_time: "08:45".into() }, ScheduleRoutine { section: 1, start_time: "09:00".into(), end_time: "09:45".into() }]).is_err());
     }
 }
